@@ -65,9 +65,9 @@ curl -X DELETE https://crabbitmq.com/queues/q_abc123 \
 
 - **Response keys:** `queue_id` (not `id`), `message_id` (not `id`)
 - **Auth:** `agent_key` for queue create/delete; `push_token` for pushing; `poll_token` for polling/deleting messages
-- **TTL:** Messages auto-expire after 24h
+- **TTL:** Messages auto-expire after 24h (set `ttl_seconds` on push for custom TTL, max 7 days)
 - **Limits:** 5 queues per agent, 1000 msg/queue/day, 64KB max body
-- **Queue info (unauthenticated):** `GET /queues/<queue_id>`
+- **Credential recovery:** `GET /queues` with `agent_key` returns all queues + tokens
 
 ## MCP Server
 
@@ -83,7 +83,7 @@ Add to `.mcp.json` for tool-based access:
 }
 ```
 
-Tools: `create_queue`, `push_message`, `poll_messages`, `delete_message`, `queue_info`
+Tools: `list_queues`, `create_queue`, `push_message`, `poll_messages`, `delete_message`, `queue_info`
 
 ## Common Patterns
 

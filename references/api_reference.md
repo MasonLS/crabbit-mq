@@ -8,27 +8,29 @@ All authenticated endpoints use `Authorization: Bearer <token>`.
 
 | Token | Used for |
 |-------|----------|
-| `agent_key` | Create queue, delete queue |
+| `agent_key` | Create queue, list queues, delete queue, rotate tokens |
 | `push_token` | Push messages |
 | `poll_token` | Poll messages, delete messages |
 
-All three tokens are returned when a queue is created. Queue info (`GET /api/queues/:id`) is unauthenticated.
+All three tokens are returned when a queue is created.
 
 ---
 
 ## Endpoints
 
-### POST /api/queues — Create a queue
+### POST /queues — Create a queue
 
 **Auth:** `agent_key`
 
-Request: no body required
+Request body:
+```json
+{ "agent_key": "<your-agent-key>" }
+```
 
 Response `201`:
 ```json
 {
   "queue_id": "q_abc123",
-  "token": "sk_...",
   "push_token": "pt_...",
   "poll_token": "pl_...",
   "created_at": "2026-01-01T00:00:00Z"
@@ -37,22 +39,45 @@ Response `201`:
 
 ---
 
-### GET /api/queues/:queue_id — Queue info
+### GET /queues — List all queues for an agent
 
-**Auth:** none
+**Auth:** `agent_key`
+
+Response `200`:
+```json
+[
+  {
+    "queue_id": "q_abc123",
+    "push_token": "pt_...",
+    "poll_token": "pl_...",
+    "message_count": 3,
+    "created_at": "2026-01-01T00:00:00Z"
+  }
+]
+```
+
+Use this to recover queue credentials after a session crash.
+
+---
+
+### GET /queues/:queue_id — Queue info
+
+**Auth:** `push_token` or `poll_token`
 
 Response `200`:
 ```json
 {
   "queue_id": "q_abc123",
   "message_count": 3,
+  "messages_sent_today": 12,
+  "daily_limit": 1000,
   "created_at": "2026-01-01T00:00:00Z"
 }
 ```
 
 ---
 
-### DELETE /api/queues/:queue_id — Delete a queue
+### DELETE /queues/:queue_id — Delete a queue
 
 **Auth:** `agent_key`
 
@@ -60,14 +85,36 @@ Response `200`: `{ "ok": true }`
 
 ---
 
-### POST /api/queues/:queue_id/messages — Push a message
+### POST /queues/:queue_id/rotate-tokens — Rotate tokens
+
+**Auth:** `agent_key`
+
+Invalidates existing `push_token` and `poll_token`, returns new ones. Use if a token is leaked.
+
+Response `200`:
+```json
+{
+  "queue_id": "q_abc123",
+  "push_token": "pt_NEW...",
+  "poll_token": "pl_NEW..."
+}
+```
+
+---
+
+### POST /queues/:queue_id/messages — Push a message
 
 **Auth:** `push_token`
 
 Request body:
 ```json
-{ "body": "string content, max 64KB" }
+{
+  "body": "string content, max 64KB",
+  "ttl_seconds": 3600
+}
 ```
+
+`ttl_seconds` is optional (default: 86400 / 24h, max: 604800 / 7 days).
 
 Response `201`:
 ```json
@@ -79,11 +126,13 @@ Response `201`:
 
 ---
 
-### GET /api/queues/:queue_id/messages — Poll messages
+### GET /queues/:queue_id/messages — Poll messages
 
 **Auth:** `poll_token`
 
-Response `200` — array (empty if no messages):
+Returns all pending messages, oldest first. Messages are NOT auto-deleted on poll.
+
+Response `200`:
 ```json
 [
   {
@@ -94,11 +143,15 @@ Response `200` — array (empty if no messages):
 ]
 ```
 
+Empty array `[]` means no messages.
+
 ---
 
-### DELETE /api/queues/:queue_id/messages/:message_id — Delete a message
+### DELETE /queues/:queue_id/messages/:message_id — Delete a message
 
 **Auth:** `poll_token`
+
+Call after processing to prevent redelivery.
 
 Response `200`: `{ "ok": true }`
 
@@ -108,13 +161,14 @@ Response `200`: `{ "ok": true }`
 
 Endpoint: `POST https://crabbitmq.com/mcp`
 
-| Tool | Params |
-|------|--------|
-| `create_queue` | `agent_key` |
-| `push_message` | `queue_id`, `push_token`, `body` |
-| `poll_messages` | `queue_id`, `poll_token` |
-| `peek_queue` | `queue_id` |
-| `delete_queue` | `queue_id`, `agent_key` |
+| Tool | Params | Description |
+|------|--------|-------------|
+| `list_queues` | `agent_key` | List all queues + credentials for an agent. Use to recover after session crash. |
+| `create_queue` | `agent_key`, `name` (optional) | Create a new queue. Returns `queue_id`, `push_token`, `poll_token`. |
+| `push_message` | `queue_id`, `push_token`, `body`, `ttl_seconds` (optional) | Push a message. |
+| `poll_messages` | `queue_id`, `poll_token` | Retrieve pending messages. |
+| `delete_message` | `queue_id`, `poll_token`, `message_id` | Acknowledge + delete a message after processing. |
+| `queue_info` | `queue_id`, `push_token` | Get queue depth and rate limit status. |
 
 Discovery: `GET https://crabbitmq.com/mcp` returns the tool manifest.
 
@@ -126,7 +180,8 @@ Discovery: `GET https://crabbitmq.com/mcp` returns the tool manifest.
 |-------|-------|
 | Queues per agent | 5 |
 | Messages per queue per day | 1,000 |
-| Message TTL | 24 hours (auto-expire) |
+| Default message TTL | 24 hours |
+| Max message TTL | 7 days (604800 seconds) |
 | Max message body | 64 KB |
 
 ---
